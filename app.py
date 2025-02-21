@@ -1,8 +1,21 @@
 from flask import Flask, request, jsonify
 import pandas as pd
+import numpy as np
 import io
 
 app = Flask(__name__)
+
+def convert_types(obj):
+    """Convert numpy types to standard Python types for JSON serialization."""
+    if isinstance(obj, np.int64) or isinstance(obj, np.int32):
+        return int(obj)
+    elif isinstance(obj, np.float64) or isinstance(obj, np.float32):
+        return float(obj)
+    elif isinstance(obj, list):
+        return [convert_types(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: convert_types(v) for k, v in obj.items()}
+    return obj
 
 @app.route('/process_file', methods=['POST'])
 def process_file():
@@ -15,7 +28,7 @@ def process_file():
     try:
         # Read file into DataFrame
         if filename.endswith('.csv'):
-            df = pd.read_csv(file, dtype=str)  # Read everything as text to avoid misinterpretation
+            df = pd.read_csv(file, dtype=str)  # Read everything as text to prevent misinterpretation
         elif filename.endswith('.xls') or filename.endswith('.xlsx'):
             df = pd.read_excel(file, dtype=str, engine='openpyxl')
         else:
@@ -72,34 +85,21 @@ def process_file():
                 "example_values": example_values
             })
 
-        import numpy as np
-
-    def convert_types(obj):
-    """Convert numpy types to standard Python types for JSON serialization."""
-        if isinstance(obj, np.int64):
-            return int(obj)
-        elif isinstance(obj, np.float64):
-            return float(obj)
-        elif isinstance(obj, list):
-            return [convert_types(i) for i in obj]
-        elif isinstance(obj, dict):
-            return {k: convert_types(v) for k, v in obj.items()}
-        return obj
-    
-        return jsonify(convert_types({
-
-                "filename": filename,
-                "file_info": {
-                    "num_rows": num_rows,
-                    "num_columns": num_cols,
-                    "missing_percentage": missing_percentage
+        # Prepare JSON response
+        response = {
+            "filename": filename,
+            "file_info": {
+                "num_rows": num_rows,
+                "num_columns": num_cols,
+                "missing_percentage": missing_percentage
             },
             "columns": column_metadata
-        })
-    
+        }
+
+        return jsonify(convert_types(response))  # Convert non-serializable types before returning JSON
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-
