@@ -110,4 +110,19 @@ def process_file():
         return jsonify({
             "filename": filename,
             "file_info": {
-                "
+                "num_rows": num_rows,
+                "num_columns": num_cols,
+                "missing_percentage": missing_percentage,
+                "duplicate_rows": duplicate_rows,
+                "inconsistent_format_warnings": inconsistent_formats
+            },
+            "columns": column_metadata,
+            "rfm_summary": rfm_summary.to_dict(orient="records")
+        })
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
