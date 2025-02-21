@@ -72,12 +72,27 @@ def process_file():
                 "example_values": example_values
             })
 
-        return jsonify({
-            "filename": filename,
-            "file_info": {
-                "num_rows": num_rows,
-                "num_columns": num_cols,
-                "missing_percentage": missing_percentage
+        import numpy as np
+
+    def convert_types(obj):
+    """Convert numpy types to standard Python types for JSON serialization."""
+        if isinstance(obj, np.int64):
+            return int(obj)
+        elif isinstance(obj, np.float64):
+            return float(obj)
+        elif isinstance(obj, list):
+            return [convert_types(i) for i in obj]
+        elif isinstance(obj, dict):
+            return {k: convert_types(v) for k, v in obj.items()}
+        return obj
+    
+        return jsonify(convert_types({
+
+                "filename": filename,
+                "file_info": {
+                    "num_rows": num_rows,
+                    "num_columns": num_cols,
+                    "missing_percentage": missing_percentage
             },
             "columns": column_metadata
         })
