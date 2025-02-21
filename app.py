@@ -15,9 +15,9 @@ def process_file():
     try:
         # Read file into DataFrame
         if filename.endswith('.csv'):
-            df = pd.read_csv(file)
+            df = pd.read_csv(file, dtype=str)  # Read everything as text to avoid misinterpretation
         elif filename.endswith('.xls') or filename.endswith('.xlsx'):
-            df = pd.read_excel(file, engine='openpyxl')
+            df = pd.read_excel(file, dtype=str, engine='openpyxl')
         else:
             return jsonify({"error": "Unsupported file format. Please upload a CSV or Excel file."}), 400
 
@@ -26,98 +26,60 @@ def process_file():
         missing_values = df.isnull().sum().sum()
         missing_percentage = round((missing_values / (num_rows * num_cols)) * 100, 2)
 
-        # Standardized column names
-        column_mappings = {
-            "Date of Gift": "gift_date",
-            "Gift Amount": "gift_amount",
-            "Donor ID": "donor_id",
-            "Gift Frequency": "gift_frequency",
-            "Gift Type": "gift_type",
-            "Campaign": "campaign",
-            "Fund": "fund",
-            "Channel Gift came in": "gift_channel",
-            "State": "state",
-            "City": "city",
-            "Zip": "postal_code",
-            "Email": "email"
-        }
-        
-        df.rename(columns=column_mappings, inplace=True)
-
         # Column-Level Metadata
         column_metadata = []
         for col in df.columns:
             unique_values = df[col].nunique()
             missing = df[col].isnull().sum()
             most_frequent = df[col].mode()[0] if not df[col].mode().empty else None
-            dtype = str(df[col].dtype)
+            example_values = df[col].dropna().sample(min(5, len(df[col].dropna())), random_state=1).tolist() if len(df[col].dropna()) > 0 else []
 
-            # Convert dtype to AI-friendly types
-            if "int" in dtype or "float" in dtype:
+            # Detect potential column standard names based on keywords
+            column_mappings = {
+                "gift": ["Gift Amount", "gift_amount", "Amount", "Gift Value"],
+                "date": ["Date of Gift", "gift_date", "Transaction Date"],
+                "donor": ["Donor ID", "donor_id", "Supporter ID"],
+                "fund": ["Fund", "Fund Name"],
+                "campaign": ["Campaign", "Appeal Code"],
+                "email": ["Email", "Email Address"],
+                "state": ["State", "Province"],
+                "city": ["City"],
+                "zip": ["Zip", "Postal Code"]
+            }
+            suggested_name = None
+            for standard_name, variations in column_mappings.items():
+                if any(variation.lower() in col.lower() for variation in variations):
+                    suggested_name = standard_name
+                    break
+
+            # Infer data type
+            inferred_type = "Text"
+            if df[col].str.match(r'^\d+(\.\d+)?$').sum() > 0.8 * len(df[col].dropna()):  # If 80%+ of values look like numbers
                 inferred_type = "Numeric"
-            elif "datetime" in dtype:
+            elif df[col].str.match(r'\d{4}-\d{2}-\d{2}').sum() > 0.8 * len(df[col].dropna()):  # YYYY-MM-DD format detection
                 inferred_type = "DateTime"
-            elif df[col].nunique() < 20:
+            elif unique_values < 20:
                 inferred_type = "Categorical"
-            else:
-                inferred_type = "Text"
-
-            stats = None
-            if inferred_type == "Numeric":
-                stats = {
-                    "min": df[col].min(),
-                    "max": df[col].max(),
-                    "mean": df[col].mean(),
-                    "std_dev": df[col].std()
-                }
 
             column_metadata.append({
-                "name": col,
-                "data_type": dtype,
+                "original_name": col,
+                "suggested_name": suggested_name,
                 "inferred_type": inferred_type,
                 "unique_values": unique_values,
                 "missing_values": missing,
                 "missing_percentage": round((missing / num_rows) * 100, 2),
                 "most_frequent_value": most_frequent,
-                "statistics": stats
+                "example_values": example_values
             })
-
-        # Donor-Level Aggregation for RFM Analysis
-        df["gift_date"] = pd.to_datetime(df["gift_date"], errors='coerce')
-        rfm_summary = df.groupby("donor_id").agg(
-            last_gift=("gift_date", "max"),
-            gift_count=("gift_amount", "count"),
-            total_given=("gift_amount", "sum"),
-            avg_gift=("gift_amount", "mean")
-        ).reset_index()
-
-        # Compute Recency, Frequency, Monetary Metrics
-        today = pd.Timestamp.today()
-        rfm_summary["recency"] = (today - rfm_summary["last_gift"]).dt.days
-        rfm_summary["frequency"] = rfm_summary["gift_count"]
-        rfm_summary["monetary"] = rfm_summary["total_given"]
-
-        # Assign RFM Scores
-        rfm_summary["R_score"] = pd.qcut(rfm_summary["recency"], 5, labels=[5, 4, 3, 2, 1]).astype(int)
-        rfm_summary["F_score"] = pd.qcut(rfm_summary["frequency"], 5, labels=[1, 2, 3, 4, 5]).astype(int)
-        rfm_summary["M_score"] = pd.qcut(rfm_summary["monetary"], 5, labels=[1, 2, 3, 4, 5]).astype(int)
-        rfm_summary["RFM_Score"] = rfm_summary["R_score"].astype(str) + rfm_summary["F_score"].astype(str) + rfm_summary["M_score"].astype(str)
-
-        # Detect potential data issues
-        duplicate_rows = df.duplicated().sum()
-        inconsistent_formats = sum(df[col].apply(lambda x: isinstance(x, str) and x.isnumeric()).sum() for col in df.select_dtypes(include=["object"]).columns)
 
         return jsonify({
             "filename": filename,
             "file_info": {
                 "num_rows": num_rows,
                 "num_columns": num_cols,
-                "missing_percentage": missing_percentage,
-                "duplicate_rows": duplicate_rows,
-                "inconsistent_format_warnings": inconsistent_formats
+                "missing_percentage": missing_percentage
             },
-            "columns": column_metadata,
-            "rfm_summary": rfm_summary.to_dict(orient="records")
+            "columns": column_metadata
         })
     
     except Exception as e:
